@@ -7,6 +7,8 @@
 void eval(char *cmdline);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv); 
+void recursive_pipe(char* command[][10],int fd[], int cmd_cnt,int depth);
+int pipe_execute(char *argv[],int bg);
 
 int main() 
 {
@@ -32,6 +34,7 @@ void eval(char *cmdline)
     char *argv[MAXARGS]; /* Argument list execve() */
     char buf[MAXLINE];   /* Holds modified command line */
     int bg;              /* Should the job run in bg or fg? */
+    int argc=0;////////////////////////////////////////
     pid_t pid;           /* Process id */
     
     strcpy(buf, cmdline);
@@ -41,19 +44,21 @@ void eval(char *cmdline)
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
         char pathname[20]="/bin/";
         strcat(pathname,argv[0]);
+        pipe_execute(argv,bg);
+        /*
         if((pid=Fork())==0){                            // Child
             if (execve(pathname, argv, environ) < 0) {	// ex) /bin/ls ls -al &
                 printf("%s: Command not found.\n", argv[0]);
                 exit(0);
             }
         }
-	    /* Parent waits for foreground job to terminate */
 	    if (!bg){ 
 	        int status;
             Waitpid(pid,&status,0);
 	    }
 	    else//when there is backgrount process!
 	        printf("%d %s", pid, cmdline);
+        */
     }
     return;
 }
@@ -106,9 +111,101 @@ int parseline(char *buf, char **argv)
     /* Should the job run in the background? */
     if ((bg = (*argv[argc-1] == '&')) != 0)
 	    argv[--argc] = NULL;
-
     return bg;
 }
 /* $end parseline */
 
+/* recursive pipe function*/
+int pipe_execute(char *argv[],int bg){
+    char* command[MAXARGS][10];
+    int fd[2];
+    int cmd_cnt=0;
+    int splited_argc=0;
+    pid_t pid_first,pid_second;
+    char pathname[20]="/bin/";
+    for(int i=0;argv[i]!=NULL;i++){
+        if(!strcmp(argv[i],"|")){
+            command[cmd_cnt][splited_argc]=NULL;
+            cmd_cnt++;
+            splited_argc=0;
+        }
+        else{           
+            command[cmd_cnt][splited_argc]=argv[i];
+            splited_argc++;
+        }
+    }
+    command[cmd_cnt][splited_argc]=NULL;
+    command[++cmd_cnt][0]=NULL;
+    strcat(pathname,command[cmd_cnt-1][0]);
+    if(cmd_cnt==1){
+        pid_t pid;
+        if((pid=Fork())==0){                            // Child
+            if (execve(pathname, argv, environ) < 0) {	// ex) /bin/ls ls -al &
+                printf("%s: Command not found.\n", argv[0]);
+                exit(0);
+            }
+        }
+	    if (!bg){ 
+	        int status;
+            Waitpid(pid,&status,0);
+	    }
+        else{
+            printf("you can execute process background in phase 3");
+        }
+        return 0;
+    }
 
+
+    if((pid_first=Fork())>0){ // parent
+        int status;
+        Wait(&status);
+        return status;
+    }
+
+
+    if(pipe(fd)<0){
+        perror("pipe error\n");
+        exit(1);
+    }
+    if((pid_second=Fork())==0){
+       recursive_pipe(command,fd,cmd_cnt-1,1);
+    }
+    close(STDIN_FILENO);
+    dup(fd[0]);
+    close(fd[0]);
+    close(fd[1]);
+    execvp(command[cmd_cnt-1][0],command[cmd_cnt-1]);
+    return 0;
+}
+/* recursive pipe */
+void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
+    int curfp[2];
+    pid_t pid;
+    char pathname[20]="/bin/";
+    strcat(pathname,command[pipe_cnt-1][0]);
+    if((pipe_cnt-depth)==0){
+        close(STDOUT_FILENO);
+        dup(fd[1]);
+        close(fd[1]);
+        close(fd[0]);
+        execvp(pathname,command[pipe_cnt-depth]);
+    }
+    else{
+        if(pipe(curfp)<0){
+            perror("pipe error\n");
+            exit(1);
+        }
+        if((pid=Fork())==0){
+            ++depth;
+            recursive_pipe(command,curfp,pipe_cnt,depth);
+        }
+        close(STDIN_FILENO);
+        dup(curfp[0]);
+        close(curfp[0]);
+        close(curfp[1]);
+        dup(fd[1]);
+        close(fd[1]);
+        close(fd[0]);
+        execvp(pathname,command[pipe_cnt-depth]);
+    }
+}
