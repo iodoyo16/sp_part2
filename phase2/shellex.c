@@ -42,8 +42,6 @@ void eval(char *cmdline)
     if (argv[0] == NULL)  
 	    return;   /* Ignore empty lines */
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
-        char pathname[20]="/bin/";
-        strcat(pathname,argv[0]);
         pipe_execute(argv,bg);
     }
     return;
@@ -140,8 +138,6 @@ int pipe_execute(char *argv[],int bg){
         }
         return 0;
     }
-
-
     if((pid_first=Fork())>0){ // parent
         int status;
         Wait(&status);
@@ -156,11 +152,12 @@ int pipe_execute(char *argv[],int bg){
     if((pid_second=Fork())==0){
        recursive_pipe(command,fd,cmd_cnt-1,1);
     }
-    close(STDIN_FILENO);
-    dup(fd[0]);
-    close(fd[0]);
-    close(fd[1]);
-    execvp(command[cmd_cnt-1][0],command[cmd_cnt-1]);
+    Close(STDIN_FILENO);
+    Dup2(fd[0],STDIN_FILENO);
+    Close(fd[0]);
+    Close(fd[1]);
+    if(execvp(command[cmd_cnt-1][0],command[cmd_cnt-1])<0)
+        unix_error("execvp error");
     return 0;
 }
 /* recursive pipe */
@@ -168,11 +165,12 @@ void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
     int curfp[2];
     pid_t pid;
     if((pipe_cnt-depth)==0){
-        close(STDOUT_FILENO);
-        dup(fd[1]);
-        close(fd[1]);
-        close(fd[0]);
-        execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth]);
+        Close(STDOUT_FILENO);
+        Dup2(fd[1],STDOUT_FILENO);
+        Close(fd[1]);
+        Close(fd[0]);
+        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+            unix_error("execvp error");
     }
     else{
         if(pipe(curfp)<0){
@@ -183,15 +181,16 @@ void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
             ++depth;
             recursive_pipe(command,curfp,pipe_cnt,depth);
         }
-        close(STDIN_FILENO);
-        dup(curfp[0]);
-        close(curfp[0]);
-        close(curfp[1]);
+        Close(STDIN_FILENO);
+        Dup2(curfp[0],STDIN_FILENO);
+        Close(curfp[0]);
+        Close(curfp[1]);
 
-        close(STDOUT_FILENO);
-        dup(fd[1]);
-        close(fd[1]);
-        close(fd[0]);
-        execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth]);
+        Close(STDOUT_FILENO);
+        Dup2(fd[1],STDOUT_FILENO);
+        Close(fd[1]);
+        Close(fd[0]);
+        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+            unix_error("execvp error");
     }
 }
