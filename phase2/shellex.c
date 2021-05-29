@@ -57,7 +57,11 @@ int builtin_command(char **argv)
     if (!strcmp(argv[0], "&"))    /* Ignore singleton & */
 	    return 1;
     if (!strcmp(argv[0], "cd")){
-        if(chdir(argv[1])<0){
+        if(argv[1]==NULL||(strcmp(argv[1],"~")==0)||(strcmp(argv[1],"$HOME")==0)){
+            if(chdir(getenv("HOME"))<0)
+                printf("cd error");
+        }
+        else if(chdir(argv[1])<0){
             printf("no such directory\n");
         }
         return 1;
