@@ -134,7 +134,7 @@ int pipe_execute(char *argv[],int bg){
             Waitpid(pid,&status,0);
 	    }
         else{
-            printf("you can execute process background in phase 3");
+            printf("you can execute process in background in phase 3");
         }
         return 0;
     }

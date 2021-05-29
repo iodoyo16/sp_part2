@@ -36,10 +36,23 @@ void eval(char *cmdline)
     
     strcpy(buf, cmdline);
     bg = parseline(buf, argv);
+    /*
+    if(*argv[i]=='\''&&*(argv[i]+strlen(argv[i])-1)=='\''){
+        *(argv[i]+strlen(argv[i])-1)='\0';
+        *argv[i]='\0';
+        argv[i]++;
+    }
+    else if(*argv[i]=='\"'&&*(argv[i]+strlen(argv[i])-1)=='\"'){
+        *(argv[i]+strlen(argv[i])-1)='\0';
+        *argv[i]='\0';
+        argv[i]++;
+    }*/
+    //for(int i=0;argv[i]!=NULL; i++)
+    //    printf("%s\n",argv[i]);
     if (argv[0] == NULL)  
 	    return;   /* Ignore empty lines */
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
-        char pathname[20]="/bin/";
+        char pathname[MAXLINE]="/bin/";
         strcat(pathname,argv[0]);
         if((pid=Fork())==0){                            // Child
             if (execve(pathname, argv, environ) < 0) {	// ex) /bin/ls ls -al &
@@ -68,7 +81,11 @@ int builtin_command(char **argv)
     if (!strcmp(argv[0], "&"))    /* Ignore singleton & */
 	    return 1;
     if (!strcmp(argv[0], "cd")){
-        if(chdir(argv[1])<0){
+        if(argv[1]==NULL||(strcmp(argv[1],"~")==0)||(strcmp(argv[1],"$HOME")==0)){
+            if(chdir(getenv("HOME"))<0)
+                printf("cd error");
+        }
+        else if(chdir(argv[1])<0){
             printf("no such directory\n");
         }
         return 1;
@@ -82,8 +99,10 @@ int builtin_command(char **argv)
 int parseline(char *buf, char **argv) 
 {
     char *delim;         /* Points to first space delimiter */
+    char *temp;
     int argc;            /* Number of args */
     int bg;              /* Background job? */
+    int quoteflag=0;
 
     buf[strlen(buf)-1] = ' ';  /* Replace trailing '\n' with space */
     while (*buf && (*buf == ' ')) /* Ignore leading spaces */
@@ -91,12 +110,34 @@ int parseline(char *buf, char **argv)
 
     /* Build the argv list */
     argc = 0;
-    while ((delim = strchr(buf, ' '))) {
+    while ((delim = strchr(buf, ' '))||quoteflag) {////////////////////////
+    ////////////////////////////////////////
+        if(quoteflag!=0){
+            if(quoteflag==1)
+                temp=strchr(buf,'\'');
+            else if(quoteflag==2)
+                temp=strchr(buf,'\"');
+            if(temp!=NULL)
+                delim=temp;
+            quoteflag=0;            
+        }
 	    argv[argc++] = buf;
 	    *delim = '\0';
 	    buf = delim + 1;
 	    while (*buf && (*buf == ' ')) /* Ignore spaces */
             buf++;
+        /////////////////////////////////////
+        if(*buf=='\''){
+            quoteflag=1;
+            *buf='\0';
+            buf++;
+        }
+        else if(*buf=='\"'){
+            quoteflag=2;
+            *buf='\0';
+            buf++;
+        }
+        //////////////////////////
     }
     argv[argc] = NULL;
     
