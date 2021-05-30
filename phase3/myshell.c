@@ -33,6 +33,7 @@ int get_nextjid();
 int addjob(char* cmdline, pid_t pid, int state);
 pid_t get_fgpid();
 void init_job_list();
+int get_fbg_id(char* argv[]);
 
 void child_handler(int sig);
 void int_handler(int sig);
@@ -96,7 +97,7 @@ int builtin_command(char **argv)
     if (!strcmp(argv[0], "cd")){
         if(argv[1]==NULL||(strcmp(argv[1],"~")==0)||(strcmp(argv[1],"$HOME")==0)){
             if(chdir(getenv("HOME"))<0)
-                printf("cd error");
+                printf("cd error\n");
         }
         else if(chdir(argv[1])<0){
             printf("no such directory\n");
@@ -107,16 +108,75 @@ int builtin_command(char **argv)
         myjobs();
         return 1;
     }
-    /*
     if(!strcmp(argv[0], "bg")){
+        int job_id=get_fbg_id(argv);
+        if(job_id<0||job_list[job_id].pid<=0){
+            printf("there is no such job\n");
+            return 1;
+        }
+        if(kill(-job_list[job_id].pid,SIGCONT)<0){
+            printf("kill signal error\n");
+            return 1;
+        }
+        job_list[job_id].state='B';
+        printf("[%d]\tRunning\t\t%s",job_id, job_list[job_id].cmdline);
         return 1;
     }
     if(!strcmp(argv[0], "fg")){
+        sigset_t mask_one,prev;
+        Sigemptyset(&mask_one);
+        Sigaddset(&mask_one,SIGCHLD);
+        Sigprocmask(SIG_BLOCK,&mask_one,&prev);
+        pid_t pid;
+        int job_id=get_fbg_id(argv);
+        if(job_id<0||job_list[job_id].pid<=0){
+            printf("there is no such job\n");
+            return 1;
+        }
+        pid=job_list[job_id].pid;
+        job_list[job_id].state='F';
+        printf("%s",job_list[job_id].cmdline);
+        if(kill(-job_list[job_id].pid,SIGCONT)<0){
+            printf("kill signal error\n");
+            return 1;
+        }
+        while(job_list[job_id].pid==pid&&job_list[job_id].state=='F'){
+            Sigsuspend(&prev);
+        }
+        //printf("suspend out\n");
         return 1;
     }
     if(!strcmp(argv[0], "kill")){
+        int job_id;
+        pid_t pid;
+        if(argv[1]==NULL)
+            printf("need operand\n");
+        else if(argv[1][0]=='%'){
+            job_id=atoi(argv[1]+1);
+            if(job_id<=0){
+                printf("wrong operand\n");
+                return 1;
+            }
+            if(kill(-job_list[job_id].pid,SIGINT)<0){
+                printf("kill signal error\n");
+                return 1;
+            }
+        }
+        else{
+            pid=(pid_t)atoi(argv[1]);
+            if(pid<=0){
+                printf("wrong operand\n");
+                return 1;
+            }
+            if(kill(-pid,SIGINT)<0){
+                printf("kill signal error\n");
+                return 1;
+            }
+        }
+        
+        
         return 1;
-    }*/
+    }
     return 0;                     /* Not a builtin command */
 }
 /* $end eval */
@@ -211,13 +271,13 @@ void pipe_execute(char *argv[],int bg,char* cmdline,char* command[][CMD_LEN],int
     Sigemptyset(&prev_mask);
     Sigemptyset(&mask_one);
     Sigaddset(&mask_one,SIGCHLD);
-    /////////////////////////////////////
+    /*
     for( int i=0;i<cmd_cnt;i++){
         for( int j=0; command[i][j]!=NULL; j++)
             printf("%s ", command[i][j]);
         printf("\n");
     }
-    ////////////////////
+    */
     strcat(pathname,command[cmd_cnt-1][0]);
     if(cmd_cnt==1){
         pid_t pid;
@@ -307,12 +367,11 @@ void parent_shell_execute(int bg, pid_t pid ,char* cmdline){
             return ;
         while(job_list[job_id].pid==pid&&job_list[job_id].state=='F'){
             Sigsuspend(&prev_mask);
-            printf("jid %d pid %d\n",job_id, (int)pid);
         }
-        printf("suspend out\n");
+        //printf("suspend out\n");
     }
     else{
-        printf("[%d] %d %s",job_id, pid, cmdline);
+        printf("[%d]\t%d\t\t%s",job_id, pid, cmdline);
     }
     return ;
 }
@@ -320,9 +379,6 @@ void int_handler(int sig){
     pid_t pid;
     int preverrono=errno;
     pid=get_fgpid();
-    Sio_puts("\nfgpid: ");
-    Sio_putl((long)pid);
-    Sio_puts("\n");
     if(pid<=0){
         errno=preverrono;
         return;
@@ -336,9 +392,6 @@ void tstp_handler(int sig){
     int preverrono=errno;
     pid_t pid;
     pid=get_fgpid();
-    Sio_puts("\nfgpid: ");
-    Sio_putl((long)pid);
-    Sio_puts("\n");
     if(pid<=0){
         errno=preverrono;
         return;
@@ -356,43 +409,37 @@ void child_handler(int sig){
     while((pid=waitpid(-1,&status,WNOHANG|WUNTRACED))>0){
         int job_id=getjid_by_pid(pid);
         if(WIFSIGNALED(status)){
-            Sio_puts("[");
-            Sio_putl((long)job_id);
-            Sio_puts("]\tTerminated\t");
-            Sio_puts(job_list[job_id].cmdline);
             deletejob_by_jobid(job_id);
         }
         else if(WIFSTOPPED(status)){
             Sio_puts("[");
             Sio_putl((long)job_id);
-            Sio_puts("]\tStopped\t");
+            Sio_puts("]\tStopped\t\t");
             Sio_puts(job_list[job_id].cmdline);
             job_list[job_id].state='T';
         }
         else if(WIFEXITED(status))
             deletejob_by_pid(pid);
     }
-    /*if(errno!=ECHILD)
-        Sio_error("wait error");*/
     errno=preverrono;
 }
 void myjobs(){
     for(int i=0;i<MAXJOB;i++){
         if(job_list[i].job_id==-1)
             continue;
-        printf("[%d]\t",job_list[i].job_id);
+        printf("[%d]\t%d\t",job_list[i].job_id,(int)job_list[i].pid);
         switch(job_list[i].state){
             case 'B':
-                printf("Running\t");
+                printf("Running\t\t");
                 break;
             case 'F':
-                //printf("Running\t");
+                printf("Running\t\t");
                 break;
             case 'T':
-                printf("Stopped\t");
+                printf("Stopped\t\t");
                 break;
             default: 
-                printf("somestate\t");
+                printf("somestate\t\t");
         }
         printf("%s", job_list[i].cmdline);
     }
@@ -450,6 +497,8 @@ int addjob(char* cmdline, pid_t pid, int state){
     if(pid<0)
         return 0;
     int job_id=get_nextjid();
+    if(job_id>=MAXJOB)
+        Sio_puts("Too many job error\n");
     job_list[job_id].pid=pid;
     job_list[job_id].job_id=job_id;
     job_list[job_id].state=state;
@@ -466,10 +515,18 @@ void init_job_list(){
     for(int i=0;i<MAXJOB;i++)
         deletejob_by_jobid(i);
 }
-void myfg(char* argv[]){
-    if(argv[1]==NULL){
-
+int get_fbg_id(char* argv[]){
+    int fg_id;
+    if(argv[1]==NULL)
+        fg_id=get_nextjid()-1;
+    else if(argv[1][0]=='%')
+        fg_id=atoi(argv[1]+1);
+    else{
+        pid_t pid;
+        pid=(pid_t)atoi(argv[1]);
+        fg_id=getjid_by_pid(pid);
     }
+    return fg_id;
 }
 
 

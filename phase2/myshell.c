@@ -170,6 +170,8 @@ int pipe_execute(char *argv[],int bg,char* cmdline){
         }
         return 0;
     }
+
+    //////////////////////////////
     if((pid_first=Fork())>0){ // parent
         int status;
         Wait(&status);
