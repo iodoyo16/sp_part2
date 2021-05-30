@@ -14,7 +14,7 @@ int main()
 
     while (1) {
 	/* Read */
-	    printf("CSE4100:P4-myshell> ");                   
+	    printf("CSE4100-SP-P4> ");                   
 	    fgets(cmdline, MAXLINE, stdin); 
 	    if (feof(stdin))
 	        exit(0);
