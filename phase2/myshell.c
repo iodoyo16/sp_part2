@@ -7,8 +7,8 @@
 void eval(char *cmdline);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv); 
-void recursive_pipe(char* command[][10],int fd[], int cmd_idx);
-int pipe_execute(char *argv[],int bg);
+void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx);
+int pipe_execute(char *argv[],int bg,char* cmdline);
 
 int main() 
 {
@@ -42,7 +42,7 @@ void eval(char *cmdline)
     if (argv[0] == NULL)  
 	    return;   /* Ignore empty lines */
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
-        pipe_execute(argv,bg);
+        pipe_execute(argv,bg,cmdline);
     }
     return;
 }
@@ -77,6 +77,7 @@ int parseline(char *buf, char **argv)
     char *delim;         /* Points to first space delimiter */
     int argc;            /* Number of args */
     int bg;              /* Background job? */
+    int quoteflag=0;
 
     buf[strlen(buf)-1] = ' ';  /* Replace trailing '\n' with space */
     while (*buf && (*buf == ' ')) /* Ignore leading spaces */
@@ -131,8 +132,8 @@ int parseline(char *buf, char **argv)
 /* $end parseline */
 
 /* recursive pipe function*/
-int pipe_execute(char *argv[],int bg){
-    char* command[MAXARGS][10];
+int pipe_execute(char *argv[],int bg,char* cmdline){
+    char* command[MAXARGS][CMD_LEN];
     int fd[2];
     int cmd_cnt=0;
     int splited_argc=0;
@@ -165,7 +166,7 @@ int pipe_execute(char *argv[],int bg){
             Waitpid(pid,&status,0);
 	    }
         else{
-            printf("you can execute process in background in phase 3");
+            printf("%d %s",pid,cmdline);
         }
         return 0;
     }
@@ -183,7 +184,6 @@ int pipe_execute(char *argv[],int bg){
     if((pid_second=Fork())==0){
        recursive_pipe(command,fd,cmd_cnt-2);
     }
-    Close(STDIN_FILENO);
     Dup2(fd[0],STDIN_FILENO);
     Close(fd[0]);
     Close(fd[1]);
@@ -196,7 +196,6 @@ void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx){
     int curfp[2];
     pid_t pid;
     if((cmd_idx)==0){
-        Close(STDOUT_FILENO);
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
@@ -211,12 +210,10 @@ void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx){
             --cmd_idx;
             recursive_pipe(command,curfp,cmd_idx);
         }
-        Close(STDIN_FILENO);
         Dup2(curfp[0],STDIN_FILENO);
         Close(curfp[0]);
         Close(curfp[1]);
 
-        Close(STDOUT_FILENO);
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
