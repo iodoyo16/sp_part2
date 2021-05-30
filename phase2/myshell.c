@@ -7,7 +7,7 @@
 void eval(char *cmdline);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv); 
-void recursive_pipe(char* command[][10],int fd[], int cmd_cnt,int depth);
+void recursive_pipe(char* command[][10],int fd[], int cmd_idx);
 int pipe_execute(char *argv[],int bg);
 
 int main() 
@@ -17,7 +17,7 @@ int main()
     while (1) {
 	/* Read */
 	    printf("CSE4100-SP-P4> ");                   
-	    fgets(cmdline, MAXLINE, stdin); 
+	    Fgets(cmdline, MAXLINE, stdin); 
 	    if (feof(stdin))
 	        exit(0);
 
@@ -84,12 +84,39 @@ int parseline(char *buf, char **argv)
 
     /* Build the argv list */
     argc = 0;
-    while ((delim = strchr(buf, ' '))) {
+    if(*buf=='\''){
+        ++buf;
+        delim=strchr(buf,'\'');
+        quoteflag=1;
+    }
+    else if(*buf=='\"'){
+        ++buf;
+        delim=strchr(buf,'\"');
+        quoteflag=2;
+    }
+    else
+        delim=strchr(buf,' ');
+    while (delim!=NULL) {
 	    argv[argc++] = buf;
 	    *delim = '\0';
 	    buf = delim + 1;
 	    while (*buf && (*buf == ' ')) /* Ignore spaces */
             buf++;
+        if(*buf=='\''){
+            quoteflag=1;
+            *buf='\0';
+            buf++;
+            delim=strchr(buf,'\'');
+        }
+        else if(*buf=='\"'){
+            quoteflag=2;
+            *buf='\0';
+            buf++;
+            delim=strchr(buf,'\"');
+        }
+        else{
+            delim=strchr(buf,' ');
+        }
     }
     argv[argc] = NULL;
     
@@ -154,7 +181,7 @@ int pipe_execute(char *argv[],int bg){
         exit(1);
     }
     if((pid_second=Fork())==0){
-       recursive_pipe(command,fd,cmd_cnt-1,1);
+       recursive_pipe(command,fd,cmd_cnt-2);
     }
     Close(STDIN_FILENO);
     Dup2(fd[0],STDIN_FILENO);
@@ -165,25 +192,24 @@ int pipe_execute(char *argv[],int bg){
     return 0;
 }
 /* recursive pipe */
-void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
+void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx){
     int curfp[2];
     pid_t pid;
-    if((pipe_cnt-depth)==0){
+    if((cmd_idx)==0){
         Close(STDOUT_FILENO);
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
-        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+        if(execvp(command[cmd_idx][0],command[cmd_idx])<0)
             unix_error("execvp error");
     }
     else{
         if(pipe(curfp)<0){
-            perror("pipe error\n");
-            exit(1);
+            unix_error("pipe error");
         }
         if((pid=Fork())==0){
-            ++depth;
-            recursive_pipe(command,curfp,pipe_cnt,depth);
+            --cmd_idx;
+            recursive_pipe(command,curfp,cmd_idx);
         }
         Close(STDIN_FILENO);
         Dup2(curfp[0],STDIN_FILENO);
@@ -194,7 +220,7 @@ void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
-        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+        if(execvp(command[cmd_idx][0],command[cmd_idx])<0)
             unix_error("execvp error");
     }
 }

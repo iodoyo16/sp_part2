@@ -19,10 +19,10 @@ pid_t shell_pid;
 void eval(char *cmdline);
 int parseline(char *buf, char **argv);
 int builtin_command(char **argv); 
-void recursive_pipe(char* command[][10],int fd[], int cmd_cnt,int depth);
-int pipe_execute(char *argv[],int bg,char* cmdline);
-void child_handler(int sig);
-
+void split_cmd_by_pipe(char* argv[],char* command[][CMD_LEN],int* cmd_cnt);
+void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx);
+void pipe_execute(char *argv[], int bg, char* cmdline,char* command[][CMD_LEN],int cmd_cnt);
+void parent_shell_execute(int bg, pid_t pid ,char* cmdline);
 
 void myjobs();
 int getjid_by_pid(pid_t pid);
@@ -34,6 +34,7 @@ int addjob(char* cmdline, pid_t pid, int state);
 pid_t get_fgpid();
 void init_job_list();
 
+void child_handler(int sig);
 void int_handler(int sig);
 void tstp_handler(int sig);
 void child_handler(int sig);
@@ -75,7 +76,10 @@ void eval(char *cmdline)
     if (argv[0] == NULL)  
 	    return;   /* Ignore empty lines */
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
-        pipe_execute(argv,bg,cmdline);
+        char* command[MAXARGS][CMD_LEN];
+        int cmd_cnt=0;
+        split_cmd_by_pipe(argv,command,&cmd_cnt);
+        pipe_execute(argv,bg,cmdline,command,cmd_cnt);
     }
     return;
 }
@@ -105,13 +109,13 @@ int builtin_command(char **argv)
     }
     /*
     if(!strcmp(argv[0], "bg")){
-
+        return 1;
     }
     if(!strcmp(argv[0], "fg")){
-
+        return 1;
     }
     if(!strcmp(argv[0], "kill")){
-
+        return 1;
     }*/
     return 0;                     /* Not a builtin command */
 }
@@ -131,12 +135,39 @@ int parseline(char *buf, char **argv)
 
     /* Build the argv list *////////////////////// "" must be solved//////////////////////////////////////////////////////////
     argc = 0;
-    while ((delim = strchr(buf, ' '))) {
+    if(*buf=='\''){
+        ++buf;
+        delim=strchr(buf,'\'');
+        quoteflag=1;
+    }
+    else if(*buf=='\"'){
+        ++buf;
+        delim=strchr(buf,'\"');
+        quoteflag=2;
+    }
+    else
+        delim=strchr(buf,' ');
+    while (delim!=NULL) {
 	    argv[argc++] = buf;
 	    *delim = '\0';
 	    buf = delim + 1;
 	    while (*buf && (*buf == ' ')) /* Ignore spaces */
             buf++;
+        if(*buf=='\''){
+            quoteflag=1;
+            *buf='\0';
+            buf++;
+            delim=strchr(buf,'\'');
+        }
+        else if(*buf=='\"'){
+            quoteflag=2;
+            *buf='\0';
+            buf++;
+            delim=strchr(buf,'\"');
+        }
+        else{
+            delim=strchr(buf,' ');
+        }
     }
     argv[argc] = NULL;
     
@@ -150,36 +181,35 @@ int parseline(char *buf, char **argv)
 }
 /* $end parseline */
 
-/* recursive pipe function*/
-int pipe_execute(char *argv[],int bg,char* cmdline){
-    char* command[MAXARGS][10];
-    int fd[2];
-    int cmd_cnt=0;
+void split_cmd_by_pipe(char* argv[] ,char* command[][CMD_LEN],int* cmd_cnt){
     int splited_argc=0;
+    for(int i=0;argv[i]!=NULL;i++){
+        if(!strcmp(argv[i],"|")){
+            command[*cmd_cnt][splited_argc]=NULL;
+            (*cmd_cnt)++;
+            splited_argc=0;
+        }
+        else{
+            command[*cmd_cnt][splited_argc]=argv[i];
+            splited_argc++;
+        }
+    }
+    command[*cmd_cnt][splited_argc]=NULL;
+    command[++(*cmd_cnt)][0]=NULL;
+}
+
+/* recursive pipe function*/
+void pipe_execute(char *argv[],int bg,char* cmdline,char* command[][CMD_LEN],int cmd_cnt){
+    
+    int fd[2];
     pid_t pid_first,pid_second;
     char pathname[20]="/bin/";
-    char state;
+
     sigset_t mask_one, prev_mask,mask_all;
     Sigfillset(&mask_all);
     Sigemptyset(&prev_mask);
     Sigemptyset(&mask_one);
     Sigaddset(&mask_one,SIGCHLD);
-    if(!bg)state='F';
-    else state='B';
-
-    for(int i=0;argv[i]!=NULL;i++){
-        if(!strcmp(argv[i],"|")){
-            command[cmd_cnt][splited_argc]=NULL;
-            cmd_cnt++;
-            splited_argc=0;
-        }
-        else{
-            command[cmd_cnt][splited_argc]=argv[i];
-            splited_argc++;
-        }
-    }
-    command[cmd_cnt][splited_argc]=NULL;
-    command[++cmd_cnt][0]=NULL;
     /////////////////////////////////////
     for( int i=0;i<cmd_cnt;i++){
         for( int j=0; command[i][j]!=NULL; j++)
@@ -188,8 +218,6 @@ int pipe_execute(char *argv[],int bg,char* cmdline){
     }
     ////////////////////
     strcat(pathname,command[cmd_cnt-1][0]);
-
-
     if(cmd_cnt==1){
         pid_t pid;
         Sigprocmask(SIG_BLOCK,&mask_one,&prev_mask);
@@ -201,45 +229,13 @@ int pipe_execute(char *argv[],int bg,char* cmdline){
                 exit(0);
             }
         }
-        Sigprocmask(SIG_BLOCK,&mask_all,NULL);
-        addjob(cmdline,pid,state);
-        Sigprocmask(SIG_SETMASK,&prev_mask,NULL);
-        int job_id=getjid_by_pid(pid);
-	    if (!bg){ 
-	        int status;
-            if(job_id<0)//already completed, reaped
-                 return 0;
-            while(job_list[job_id].pid==pid&&job_list[job_id].state=='F'){
-                Sigsuspend(&prev_mask);
-                printf("jid %d pid %d\n",job_id, (int)pid);
-            }
-            printf("suspend out\n");
-	    }
-        else{
-            printf("[%d] %d %s", job_id,pid, cmdline);
-        }
-        return 0;
+        parent_shell_execute(bg,pid,cmdline);
+        return;
     }
 
     if((pid_first=Fork())>0){ // parent
-        Sigprocmask(SIG_BLOCK,&mask_all,NULL);
-        addjob(cmdline,pid_first,state);
-        Sigprocmask(SIG_SETMASK,&prev_mask,NULL);
-        int status;
-        int job_id=getjid_by_pid(pid_first);
-        if(!bg){
-            if(job_id<0)//already completed, reaped
-                 return 0;
-            while(job_list[job_id].pid==pid_first&&job_list[job_id].state=='F'){
-                Sigsuspend(&prev_mask);
-                printf("jid %d pid %d\n",job_id, (int)pid_first);
-            }
-            printf("suspend out\n");
-        }
-        else{
-            printf("[%d] %d %s",job_id, pid_first, cmdline);
-        }
-        return status;
+        parent_shell_execute(bg,pid_first,cmdline);
+        return;
     }
     Sigprocmask(SIG_SETMASK,&prev_mask,NULL);
     Setpgid(0,0);///////////////////////
@@ -247,7 +243,7 @@ int pipe_execute(char *argv[],int bg,char* cmdline){
         unix_error("pipe error");
     }
     if((pid_second=Fork())==0){
-       recursive_pipe(command,fd,cmd_cnt-1,1);
+       recursive_pipe(command,fd,cmd_cnt-2);
     }
     Close(STDIN_FILENO);
     Dup2(fd[0],STDIN_FILENO);
@@ -255,18 +251,18 @@ int pipe_execute(char *argv[],int bg,char* cmdline){
     Close(fd[1]);
     if(execvp(command[cmd_cnt-1][0],command[cmd_cnt-1])<0)
         unix_error("execvp error");
-    return 0;
+    return ;
 }
 /* recursive pipe */
-void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
+void recursive_pipe(char* command[][CMD_LEN],int fd[], int cmd_idx){
     int curfp[2];
     pid_t pid;
-    if((pipe_cnt-depth)==0){
+    if((cmd_idx)==0){
         Close(STDOUT_FILENO);
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
-        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+        if(execvp(command[cmd_idx][0],command[cmd_idx])<0)
             unix_error("execvp error");
     }
     else{
@@ -274,8 +270,8 @@ void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
             unix_error("pipe error");
         }
         if((pid=Fork())==0){
-            ++depth;
-            recursive_pipe(command,curfp,pipe_cnt,depth);
+            --cmd_idx;
+            recursive_pipe(command,curfp,cmd_idx);
         }
         Close(STDIN_FILENO);
         Dup2(curfp[0],STDIN_FILENO);
@@ -286,9 +282,39 @@ void recursive_pipe(char* command[][10],int fd[], int pipe_cnt,int depth){
         Dup2(fd[1],STDOUT_FILENO);
         Close(fd[1]);
         Close(fd[0]);
-        if(execvp(command[pipe_cnt-depth][0],command[pipe_cnt-depth])<0)
+        if(execvp(command[cmd_idx][0],command[cmd_idx])<0)
             unix_error("execvp error");
     }
+}
+
+void parent_shell_execute(int bg, pid_t pid ,char* cmdline){
+    char state;
+    if(!bg)state='F';
+    else state='B';
+    sigset_t mask_one, prev_mask,mask_all;
+
+    Sigfillset(&mask_all);
+    Sigemptyset(&prev_mask);
+    Sigemptyset(&mask_one);
+    Sigaddset(&mask_one,SIGCHLD);
+
+    Sigprocmask(SIG_BLOCK,&mask_all,NULL);
+    addjob(cmdline,pid,state);
+    Sigprocmask(SIG_SETMASK,&prev_mask,NULL);
+    int job_id=getjid_by_pid(pid);
+    if(!bg){
+        if(job_id<0)//already completed, reaped
+            return ;
+        while(job_list[job_id].pid==pid&&job_list[job_id].state=='F'){
+            Sigsuspend(&prev_mask);
+            printf("jid %d pid %d\n",job_id, (int)pid);
+        }
+        printf("suspend out\n");
+    }
+    else{
+        printf("[%d] %d %s",job_id, pid, cmdline);
+    }
+    return ;
 }
 void int_handler(int sig){
     pid_t pid;

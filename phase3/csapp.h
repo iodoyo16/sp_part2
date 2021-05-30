@@ -37,7 +37,7 @@
 
 /* cmd_arr */
 #define CMD_NUM 8
-#define CMD_LEN 10
+#define CMD_LEN 30
 
 /* Simplifies calls to bind(), connect(), and accept() */
 /* $begin sockaddrdef */

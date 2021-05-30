@@ -36,19 +36,8 @@ void eval(char *cmdline)
     
     strcpy(buf, cmdline);
     bg = parseline(buf, argv);
-    /*
-    if(*argv[i]=='\''&&*(argv[i]+strlen(argv[i])-1)=='\''){
-        *(argv[i]+strlen(argv[i])-1)='\0';
-        *argv[i]='\0';
-        argv[i]++;
-    }
-    else if(*argv[i]=='\"'&&*(argv[i]+strlen(argv[i])-1)=='\"'){
-        *(argv[i]+strlen(argv[i])-1)='\0';
-        *argv[i]='\0';
-        argv[i]++;
-    }*/
-    //for(int i=0;argv[i]!=NULL; i++)
-    //    printf("%s\n",argv[i]);
+    for(int i=0;argv[i]!=NULL;i++)
+        printf("%s\n", argv[i]);
     if (argv[0] == NULL)  
 	    return;   /* Ignore empty lines */
     if (!builtin_command(argv)) { //quit -> exit(0), & -> ignore, other -> run
@@ -110,34 +99,39 @@ int parseline(char *buf, char **argv)
 
     /* Build the argv list */
     argc = 0;
-    while ((delim = strchr(buf, ' '))||quoteflag) {////////////////////////
-    ////////////////////////////////////////
-        if(quoteflag!=0){
-            if(quoteflag==1)
-                temp=strchr(buf,'\'');
-            else if(quoteflag==2)
-                temp=strchr(buf,'\"');
-            if(temp!=NULL)
-                delim=temp;
-            quoteflag=0;            
-        }
+    if(*buf=='\''){
+        ++buf;
+        delim=strchr(buf,'\'');
+        quoteflag=1;
+    }
+    else if(*buf=='\"'){
+        ++buf;
+        delim=strchr(buf,'\"');
+        quoteflag=2;
+    }
+    else
+        delim=strchr(buf,' ');
+    while (delim!=NULL) {
 	    argv[argc++] = buf;
 	    *delim = '\0';
 	    buf = delim + 1;
 	    while (*buf && (*buf == ' ')) /* Ignore spaces */
             buf++;
-        /////////////////////////////////////
         if(*buf=='\''){
             quoteflag=1;
             *buf='\0';
             buf++;
+            delim=strchr(buf,'\'');
         }
         else if(*buf=='\"'){
             quoteflag=2;
             *buf='\0';
             buf++;
+            delim=strchr(buf,'\"');
         }
-        //////////////////////////
+        else{
+            delim=strchr(buf,' ');
+        }
     }
     argv[argc] = NULL;
     
